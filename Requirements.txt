@@ -1,0 +1,7 @@
+pycryptodome
+pandas
+numpy
+scikit-learn
+openpyxl
+opencv-python
+psutil
