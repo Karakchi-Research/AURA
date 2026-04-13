@@ -1,0 +1,7 @@
+__pycache__/
+*.xlsx
+*.zip
+*.raw
+*.tmp_index
+*.bias
+.DS_Store
