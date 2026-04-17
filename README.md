@@ -5,7 +5,7 @@
 
 ## 📌 Project Overview
 
-**AURA** (originally *Additive Manufacturing Utility for Real-time Anomaly Detection*, evolved from its initial purpose as an *AES Utility for Real-time Anomaly Detection*) is a lightweight, modular framework for detecting geometric anomalies in Laser Powder Bed Fusion (LPBF) thin-wall structures through multi-modal optical and temporal analysis. The framework monitors 316L stainless steel thin walls (0.2–1.0 mm) during manufacturing using layer-wise optical imaging for in-situ wall thickness, surface roughness, and center drift quantification [1].
+**AURA** (*Additive Manufacturing Utility for Real-time Anomaly Detection*, evolved from its initial purpose as an *AES Utility for Real-time Anomaly Detection*) is a lightweight, modular framework for detecting geometric anomalies in Laser Powder Bed Fusion (LPBF) thin-wall structures through multi-modal optical and temporal analysis. The framework monitors 316L stainless steel thin walls (0.2–1.0 mm) during manufacturing using layer-wise optical imaging for in-situ wall thickness, surface roughness, and center drift quantification [1].
 
 A key innovation is repurposing "timing" models originally designed for AES-128 side-channel analysis to analyze **temporal dynamics** (layer-to-layer evolution), enabling robust detection of manufacturing instabilities. The framework supports:
 
