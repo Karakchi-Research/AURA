@@ -5,9 +5,9 @@
 
 ## 📌 Project Overview
 
-**AURA** is a lightweight, modular framework for detecting geometric anomalies in Laser Powder Bed Fusion (LPBF) thin-wall structures through multi-modal optical and temporal analysis. The framework monitors 316L stainless steel thin walls (0.2–1.0 mm) during manufacturing using layer-wise optical imaging, implementing the approach described in "IN-SITU LAYER-WISE GEOMETRY EXTRACTION OF THIN-WALL 316L STRUCTURES FABRICATED BY LASER POWDER BED FUSION" [1] for in-situ wall thickness, surface roughness, and center drift quantification.
+**AURA** (originally *Additive Manufacturing Utility for Real-time Anomaly Detection*, evolved from its initial purpose as an *AES Utility for Real-time Anomaly Detection*) is a lightweight, modular framework for detecting geometric anomalies in Laser Powder Bed Fusion (LPBF) thin-wall structures through multi-modal optical and temporal analysis. The framework monitors 316L stainless steel thin walls (0.2–1.0 mm) during manufacturing using layer-wise optical imaging for in-situ wall thickness, surface roughness, and center drift quantification [1].
 
-A key innovation is repurposing "timing" models to analyze **temporal dynamics** (layer-to-layer evolution) rather than encryption timing, enabling robust detection of manufacturing instabilities. The framework supports:
+A key innovation is repurposing "timing" models originally designed for AES-128 side-channel analysis to analyze **temporal dynamics** (layer-to-layer evolution), enabling robust detection of manufacturing instabilities. The framework supports:
 
 - **Spatial detection** — Wall thickness deviation, surface roughness, and center drift from individual layer images
 - **Temporal detection** — Layer-to-layer cumulative changes indicating process instability
@@ -22,20 +22,20 @@ The framework implements three primary detection strategies:
 
 ## ⚙️ Features
 
-- 🔍 **LPBF In-Situ Monitoring** — Layer-by-layer geometric tracking during thin-wall fabrication based on reference [1]
+- 🔍 **LPBF In-Situ Monitoring** — Layer-by-layer geometric tracking during thin-wall fabrication based on reference [1]; adapted from original AES-128 side-channel monitoring
 - 📊 **Multi-Modal Feature Extraction** (per layer image):
   - **Spatial features**: Wall thickness (px), center X position, left/right edge detection, surface roughness (Laplacian), texture variance, contour irregularity
-  - **Temporal features**: Layer-to-layer thickness deviation (%), center drift (px), rolling statistics, accumulation metrics, thickness velocity
+  - **Temporal features**: Layer-to-layer thickness deviation (%), center drift (px), rolling statistics, accumulation metrics, thickness velocity (evolved from AES execution timing patterns)
   - **Hybrid vectors**: Combined spatial + temporal for fused detection
 - 👁️ **Computer Vision Pipeline**:
   - Gaussian blur + horizontal gradient-based edge detection (per reference [1])
   - Intensity profile averaging for robust wall boundary identification
   - Multi-scale roughness analysis via Laplacian operator
-- 🎯 **Three Detection Modes**:
+- 🎯 **Three Detection Modes** (originally developed for AES timing analysis, adapted for LPBF):
   - **Spatial Detection** — Threshold-based anomaly detection on wall geometry
   - **Temporal Detection** — Threshold-based anomaly detection on layer-to-layer changes  
   - **Hybrid Detection** — Fusion of spatial + temporal criteria for improved recall
-- 🤖 **ML-Based Variants** — Random Forest classifiers for all three modes + adaptive thresholding
+- 🤖 **ML-Based Variants** — Random Forest classifiers for all three modes + adaptive thresholding (maintains original AES model architecture)
 - 📷 **Batch Image Processing** — Efficient frame-by-frame feature extraction from layer image directories
 - 📈 **Automated Reporting** — Excel (.xlsx) export with detailed geometric metrics, anomaly flags, and statistics
 - 🏃 **Lightweight & Fast** — ~100ms per layer inference, suitable for real-time manufacturing feedback
