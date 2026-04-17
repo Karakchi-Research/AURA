@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-AURA Testing Orchestrator
-Runs all model experiments (timing-only, optical-only, timing+optical fused)
-with both threshold and ML detection methods on a directory of optical camera images.
-Aggregates reports and metrics.
+AURA LPBF Geometric Monitoring Orchestrator
+Runs all model experiments (timing-only, optical-only, timing+optical hybrid)
+with both threshold-based and ML-based detection methods on a directory of optical camera images.
+Analyzes spatial geometry (wall thickness, surface roughness, center drift) and temporal 
+dynamics (layer-to-layer changes) to detect LPBF thin-wall instabilities.
+Aggregates reports and metrics across all 6 detection approaches.
 """
 
 import sys
@@ -14,14 +16,18 @@ import shutil
 import re
 import json
 
-# ===== NEW SIMPLIFIED TEST SCRIPTS =====
+# ===== LPBF GEOMETRIC MONITORING TESTS =====
+# Test models grouped by detection approach:
+#   Spatial (Optical): wall thickness, drift, roughness from static images
+#   Temporal (Timing): layer-to-layer changes and cumulative instability evolution
+#   Hybrid: combined spatial + temporal features for robust anomaly detection
 SCRIPTS = [
-    "timing_threshold.py",
-    "timing_ml.py",
-    "optical_threshold.py",
-    "optical_ml.py",
-    "timing_optical_threshold.py",
-    "timing_optical_ml.py",
+    "optical_threshold.py",        # Spatial: threshold-based anomaly detection
+    "optical_ml.py",               # Spatial: ML-based anomaly detection (Random Forest)
+    "timing_threshold.py",         # Temporal: threshold-based anomaly detection
+    "timing_ml.py",                # Temporal: ML-based anomaly detection (Random Forest)
+    "timing_optical_threshold.py", # Hybrid: spatial + temporal threshold fusion
+    "timing_optical_ml.py",        # Hybrid: spatial + temporal ML fusion
 ]
 
 METRIC_RE = re.compile(
@@ -111,9 +117,13 @@ def extract_metrics(log_content):
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python3 run_all.py <image_directory> [anomaly_percent] [run_label]")
+        print("  python3 run_all.py <image_directory> [thickness_threshold] [run_label]")
         print("\nExample:")
-        print("  python3 run_all.py /path/to/optical_images 20 my_experiment")
+        print("  python3 run_all.py /path/to/optical_images 5 lpbf_test_0.6mm")
+        print("\nParameters:")
+        print("  image_directory: Path to directory with LPBF optical camera images")
+        print("  thickness_threshold: Max acceptable thickness variance in % (default: 5)")
+        print("  run_label: Experiment label for output (default: auto-generated timestamp)")
         sys.exit(1)
 
     image_dir = Path(sys.argv[1])
@@ -121,11 +131,11 @@ def main():
         print(f"ERROR: Image directory not found or not a directory: {image_dir}")
         sys.exit(1)
 
-    anomaly_percent = sys.argv[2] if len(sys.argv) > 2 else "20"
+    thickness_threshold = sys.argv[2] if len(sys.argv) > 2 else "5"
     run_label = (
         sys.argv[3]
         if len(sys.argv) > 3
-        else f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        else f"lpbf_run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     )
 
     output_dir = Path("reports") / run_label
@@ -138,20 +148,20 @@ def main():
     all_metrics = {}
 
     print(f"\n{'='*80}")
-    print(f"AURA Testing Orchestrator")
+    print(f"AURA LPBF Geometric Monitoring Orchestrator")
     print(f"{'='*80}")
     print(f"Image Directory: {image_dir}")
-    print(f"Anomaly Rate: {anomaly_percent}%")
+    print(f"Thickness Threshold: ±{thickness_threshold}%")
     print(f"Run Label: {run_label}")
     print(f"Output Directory: {output_dir}")
     print(f"Python Command: {python_cmd}\n")
 
     with summary_file.open("w") as summary:
-        summary.write(f"AURA Testing Experiment Report\n")
+        summary.write(f"AURA LPBF Geometric Monitoring Experiment Report\n")
         summary.write(f"{'='*80}\n")
         summary.write(f"Run label: {run_label}\n")
         summary.write(f"Image directory: {image_dir}\n")
-        summary.write(f"Anomaly rate: {anomaly_percent}%\n")
+        summary.write(f"Thickness threshold: ±{thickness_threshold}%\n")
         summary.write(f"Started: {timestamp()}\n\n")
 
         for script in SCRIPTS:
@@ -168,7 +178,7 @@ def main():
                 exit_codes[script] = 127
                 continue
 
-            cmd = [python_cmd, str(script_path), str(image_dir), anomaly_percent]
+            cmd = [python_cmd, str(script_path), str(image_dir), thickness_threshold]
 
             with log_file.open("w") as log:
                 process = subprocess.run(
@@ -210,19 +220,18 @@ def main():
         summary.write(f"{'='*80}\n\n")
 
         # Accuracy comparison
-        summary.write("Accuracy Comparison:\n")
-        summary.write(f"{'  Model':<35} {'Accuracy':<12} {'Precision':<12} {'Recall':<12} {'F1-Score':<12}\n")
-        summary.write(f"  {'-'*75}\n")
+        summary.write("Detection Performance:\n")
+        summary.write(f"{'  Model':<35} {'Accuracy':<12} {'Precision':<12} {'Recall':<12}\n")
+        summary.write(f"  {'-'*71}\n")
         
         for script_name, metrics in sorted(all_metrics.items()):
             accuracy = metrics.get('accuracy', 0)
             precision = metrics.get('precision', 0)
             recall = metrics.get('recall', 0)
-            f1 = metrics.get('f1', 0)
-            summary.write(f"  {script_name:<35} {accuracy:>10.2f}% {precision:>10.2f}% {recall:>10.2f}% {f1:>10.2f}%\n")
+            summary.write(f"  {script_name:<35} {accuracy:>10.2f}% {precision:>10.2f}% {recall:>10.2f}%\n")
 
         # Detection comparison
-        summary.write(f"\n\nDetection Statistics:\n")
+        summary.write(f"\n\nAnomalies Detected:\n")
         summary.write(f"{'  Model':<35} {'TP':<8} {'FP':<8} {'FN':<8} {'Total':<8}\n")
         summary.write(f"  {'-'*63}\n")
         
@@ -230,18 +239,17 @@ def main():
             tp = metrics.get('tp', 0)
             fp = metrics.get('fp', 0)
             fn = metrics.get('fn', 0)
-            total = tp + fp + fn
+            total = tp + fp + fn if (tp + fp + fn > 0) else metrics.get('detected_anomalies', 0)
             summary.write(f"  {script_name:<35} {tp:<8} {fp:<8} {fn:<8} {total:<8}\n")
 
         # Performance comparison
         summary.write(f"\n\nPerformance Metrics:\n")
-        summary.write(f"{'  Model':<35} {'Latency (µs)':<15} {'Memory (MB)':<15}\n")
-        summary.write(f"  {'-'*64}\n")
+        summary.write(f"{'  Model':<35} {'Memory (MB)':<15}\n")
+        summary.write(f"  {'-'*50}\n")
         
         for script_name, metrics in sorted(all_metrics.items()):
-            latency = metrics.get('latency_us', 0)
             memory = metrics.get('memory_mb', 0)
-            summary.write(f"  {script_name:<35} {latency:>13.2f} {memory:>13.2f}\n")
+            summary.write(f"  {script_name:<35} {memory:>13.2f}\n")
 
         summary.write(f"\n\nFinished: {timestamp()}\n")
 

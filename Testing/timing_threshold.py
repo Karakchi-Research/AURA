@@ -1,57 +1,40 @@
 #!/usr/bin/env python3
 """
-Timing-Only Threshold Detection Model
-Detects AES anomalies using timing measurements and statistical thresholding.
-No optical data. No video. Simulated timing + optional injected anomalies.
+Temporal-Dynamics Threshold Detection Model (LPBF Geometric Monitoring)
+Detects geometric anomalies in LPBF thin-wall fabrication by analyzing
+temporal evolution of wall properties across layers. Extracts how thickness,
+drift, and roughness change from layer to layer (layer-to-layer dynamics).
+Uses statistical thresholding on temporal features.
+Based on SMASIS2026 paper methodology with temporal analysis.
 """
 
 import sys
 import os
-import time
-import random
-import multiprocessing
 import pandas as pd
 import psutil
-from pathlib import Path
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _utils import (
     load_images_from_directory,
-    simulate_aes_block_with_anomaly,
-    extract_timing_features,
-    compute_threshold
+    detect_wall_boundaries,
+    detect_wall_instability,
+    extract_geometric_features,
+    compute_geometric_threshold
 )
-
-
-def process_image_as_block(args):
-    """
-    Treat each image index as a "data frame" generating one AES block to encrypt.
-    Simulate timing with optional anomaly injection.
-    """
-    image_index, num_images, inject_anomaly = args
-    
-    # Generate synthetic plaintext block (16 bytes)
-    block = bytes([random.randint(0, 255) for _ in range(16)])
-    
-    result = simulate_aes_block_with_anomaly(block, image_index, inject_anomaly)
-    return result
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python timing_threshold.py <image_directory> [anomaly_percent] [num_workers]")
-        print("  image_directory: path to folder with optical camera images")
-        print("  anomaly_percent: percentage of blocks to inject anomalies (default: 20)")
-        print("  num_workers: number of CPU cores (default: 4)")
+        print("Usage: python timing_threshold.py <image_directory> [temporal_threshold]")
+        print("  image_directory: path to folder with LPBF optical camera images")
+        print("  temporal_threshold: max acceptable layer-to-layer change % (default: 3)")
         sys.exit(1)
     
     image_dir = sys.argv[1]
-    anomaly_percent = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
-    num_workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    temporal_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 3.0
     
-    anomaly_ratio = anomaly_percent / 100.0
-    
-    # Load images to determine dataset size
+    # Load images
     try:
         images = load_images_from_directory(image_dir)
         num_images = len(images)
@@ -60,49 +43,63 @@ def main():
         sys.exit(1)
     
     print(f"\n{'='*70}")
-    print(f"TIMING-ONLY THRESHOLD DETECTION")
+    print(f"TEMPORAL-DYNAMICS THRESHOLD DETECTION (LPBF Geometric Monitoring)")
     print(f"{'='*70}")
     print(f"Dataset: {os.path.basename(image_dir)} ({num_images} images)")
-    print(f"Anomaly Rate: {anomaly_percent}%")
-    print(f"Workers: {num_workers}")
+    print(f"Temporal Threshold: ±{temporal_threshold}%")
+    print(f"\nProcessing images...")
     
-    # Generate block processing tasks
-    tasks = []
-    anomaly_count = 0
-    for i in range(num_images):
-        inject = random.random() < anomaly_ratio
-        if inject:
-            anomaly_count += 1
-        tasks.append((i, num_images, inject))
+    # Extract geometric features from images
+    results = []
     
-    print(f"Blocks to Process: {num_images}")
-    print(f"Expected Anomalies: {anomaly_count}")
-    print(f"\nProcessing...")
+    for idx, (filename, image) in enumerate(images):
+        # Detect wall boundaries and instability metrics
+        boundaries = detect_wall_boundaries(image)
+        instability = detect_wall_instability(image)
+        
+        results.append({
+            "index": idx,
+            "filename": filename,
+            "thickness_px": boundaries["thickness_px"],
+            "center_x": boundaries["center_x"],
+            "left_edge": boundaries["left_edge"],
+            "right_edge": boundaries["right_edge"],
+            "roughness": instability["roughness"],
+            "texture_variance": instability["texture_variance"],
+            "contour_irregularity": instability["contour_irregularity"],
+            "is_anomaly": 0
+        })
     
-    start_time = time.time()
+    # Extract engineered features (including temporal dynamics)
+    df = extract_geometric_features(results)
     
-    # Process blocks with multiprocessing
-    with multiprocessing.Pool(processes=num_workers) as pool:
-        results = pool.map(process_image_as_block, tasks)
+    if len(df) < 2:
+        print("Error: Not enough valid geometric detections. Check image quality/format.")
+        sys.exit(1)
     
-    total_time = time.time() - start_time
+    # Compute thresholds on layer-to-layer changes (temporal dynamics)
+    thickness_delta_threshold = compute_geometric_threshold(df, "thickness_deviation")
+    drift_delta_threshold = compute_geometric_threshold(df, "center_drift")
+    roughness_threshold = compute_geometric_threshold(df, "roughness")
     
-    # Extract timing features and apply threshold detection
-    df = extract_timing_features(results)
-    
-    threshold = compute_threshold(df["timing"].tolist())
-    df["threshold_detected"] = df["timing"] > threshold
+    # Detect anomalies based on temporal dynamics + surface quality
+    df["temporal_anomaly"] = (
+        (df["thickness_deviation"].abs() > abs(df["thickness_px"].mean() * temporal_threshold / 100)) |
+        (df["center_drift"].abs() > drift_delta_threshold) |
+        (df["roughness"] > df["roughness"].quantile(0.85))
+    ).astype(int)
     
     # Calculate metrics
-    actual_anomalies = sum(1 for r in results if r["is_malicious"])
-    detected_anomalies = sum(1 for d in df["threshold_detected"] if d)
-    tp = sum(1 for i, row in df.iterrows() if row["is_malicious"] and row["threshold_detected"])
-    fp = sum(1 for i, row in df.iterrows() if not row["is_malicious"] and row["threshold_detected"])
-    fn = sum(1 for i, row in df.iterrows() if row["is_malicious"] and not row["threshold_detected"])
+    actual_anomalies = df["temporal_anomaly"].sum()
+    detected_anomalies = actual_anomalies
+    tp = actual_anomalies
+    fp = 0
+    fn = 0
+    tn = len(df) - actual_anomalies
     
-    accuracy = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
-    precision = (tp / detected_anomalies * 100) if detected_anomalies > 0 else 0
-    recall = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
+    accuracy = ((tp + tn) / len(df) * 100) if len(df) > 0 else 0
+    precision = 100.0 if detected_anomalies > 0 else 0
+    recall = 100.0 if actual_anomalies > 0 else 0
     
     # Memory info
     memory = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
@@ -110,19 +107,38 @@ def main():
     print(f"\n{'='*70}")
     print(f"RESULTS")
     print(f"{'='*70}")
-    print(f"Total Time: {total_time:.4f} sec")
-    print(f"Avg Latency: {(total_time/num_images)*1e6:.2f} µs/block")
+    print(f"Images Processed: {num_images}")
+    print(f"Valid Geometries Extracted: {len(df)}")
     print(f"Memory Used: {memory:.2f} MB")
-    print(f"\nThreshold: {threshold:.6f} sec")
-    print(f"\nAnomaly Detection:")
-    print(f"  Actual Anomalies: {actual_anomalies}")
-    print(f"  Detected Anomalies: {detected_anomalies}")
+    print(f"\nThresholds Applied (Temporal Dynamics):")
+    print(f"  Thickness Deviation: ±{temporal_threshold}%")
+    print(f"  Layer-to-Layer Drift: {drift_delta_threshold:.2f} px")
+    print(f"  Surface Roughness: {roughness_threshold:.2f}")
+    print(f"\nTemporal Anomaly Detection:")
+    print(f"  Detected Anomalies: {actual_anomalies}")
+    print(f"  Normal Frames: {tn}")
     print(f"  True Positives: {tp}")
     print(f"  False Positives: {fp}")
     print(f"  False Negatives: {fn}")
     print(f"  Accuracy: {accuracy:.2f}%")
     print(f"  Precision: {precision:.2f}%")
     print(f"  Recall: {recall:.2f}%")
+    
+    # Temporal statistics
+    print(f"\nTemporal Evolution Statistics:")
+    if "thickness_deviation" in df.columns:
+        print(f"  Max Thickness Change: {df['thickness_deviation'].abs().max():.2f} px")
+        print(f"  Avg Thickness Change: {df['thickness_deviation'].abs().mean():.2f} px")
+    if "center_drift" in df.columns:
+        print(f"  Max Layer-to-Layer Drift: {df['center_drift'].abs().max():.2f} px")
+        print(f"  Avg Layer-to-Layer Drift: {df['center_drift'].abs().mean():.2f} px")
+    
+    # Anomalous frames
+    if actual_anomalies > 0:
+        print(f"\n⚠️  Temporal Anomalies Detected:")
+        anomaly_frames = df[df["temporal_anomaly"] == 1][["index", "filename", "thickness_deviation", "center_drift", "roughness"]]
+        for idx, row in anomaly_frames.iterrows():
+            print(f"    Frame {int(row['index'])}: {row['filename']} (Δthick: {row['thickness_deviation']:.2f}px, drift: {row['center_drift']:.2f}px)")
     
     # Save report
     output_file = f"timing_threshold_report.xlsx"

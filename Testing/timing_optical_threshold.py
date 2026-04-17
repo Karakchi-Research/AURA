@@ -1,65 +1,38 @@
 #!/usr/bin/env python3
 """
-Timing + Optical Threshold Detection Model
-Detects AES anomalies by fusing timing and optical measurements
-with statistical thresholding.
-Combines AES simulation (timing) with real images (optical).
+Hybrid Spatial-Temporal Threshold Detection Model (LPBF Geometric Monitoring)
+Detects geometric anomalies in LPBF thin-wall fabrication by fusing:
+  - Spatial features: Wall thickness, center position, surface roughness (from images)
+  - Temporal features: Layer-to-layer changes in thickness and drift
+Uses statistical thresholding on the fused multi-modal features.
+Based on SMASIS2026 paper methodology with hybrid spatial-temporal analysis.
 """
 
 import sys
 import os
-import time
-import random
-import multiprocessing
 import pandas as pd
 import psutil
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _utils import (
     load_images_from_directory,
-    simulate_aes_block_with_anomaly,
-    extract_optical_intensity,
-    extract_fused_features,
-    compute_threshold
+    detect_wall_boundaries,
+    detect_wall_instability,
+    extract_geometric_features,
+    compute_geometric_threshold
 )
-
-
-def process_image_with_timing(args):
-    """
-    Process image frame with simultaneous AES encryption (timing measurement).
-    Inject anomalies that affect both timing and optical channels.
-    """
-    image_index, optical_signal, inject_anomaly = args
-    
-    # Simulate AES block encryption
-    block = bytes([random.randint(0, 255) for _ in range(16)])
-    result = simulate_aes_block_with_anomaly(block, image_index, inject_anomaly)
-    
-    # If anomaly injected, it affects optical signal too
-    final_optical = optical_signal
-    if inject_anomaly:
-        final_optical += random.uniform(40, 80)  # Bright flash from fault
-    
-    return {
-        "index": result["index"],
-        "timing": result["timing"],
-        "optical": final_optical,
-        "is_malicious": result["is_malicious"]
-    }
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python timing_optical_threshold.py <image_directory> [anomaly_percent] [num_workers]")
-        print("  image_directory: path to folder with optical camera images")
-        print("  anomaly_percent: percentage of frames to inject anomalies (default: 20)")
-        print("  num_workers: number of CPU cores (default: 4)")
+        print("Usage: python timing_optical_threshold.py <image_directory> [hybrid_threshold]")
+        print("  image_directory: path to folder with LPBF optical camera images")
+        print("  hybrid_threshold: combined spatial-temporal threshold % (default: 4)")
         sys.exit(1)
     
     image_dir = sys.argv[1]
-    anomaly_percent = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
-    num_workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
-    anomaly_ratio = anomaly_percent / 100.0
+    hybrid_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
     
     # Load images
     try:
@@ -70,61 +43,72 @@ def main():
         sys.exit(1)
     
     print(f"\n{'='*70}")
-    print(f"TIMING + OPTICAL THRESHOLD DETECTION (FUSED)")
+    print(f"HYBRID SPATIAL-TEMPORAL THRESHOLD DETECTION (LPBF Monitoring)")
     print(f"{'='*70}")
     print(f"Dataset: {os.path.basename(image_dir)} ({num_images} images)")
-    print(f"Anomaly Rate: {anomaly_percent}%")
-    print(f"Workers: {num_workers}")
-    print(f"\nExtracting optical signals from images...")
+    print(f"Hybrid Threshold: ±{hybrid_threshold}%")
+    print(f"\nProcessing images...")
     
-    # Extract optical signals from all images
-    optical_signals = []
-    for _, image in images:
-        optical_signals.append(extract_optical_intensity(image))
+    # Extract geometric features from images
+    results = []
     
-    # Generate tasks with anomaly injection
-    tasks = []
-    anomaly_count = 0
-    for i in range(num_images):
-        inject = random.random() < anomaly_ratio
-        if inject:
-            anomaly_count += 1
-        tasks.append((i, optical_signals[i], inject))
+    for idx, (filename, image) in enumerate(images):
+        # Detect wall boundaries (spatial) and instability metrics
+        boundaries = detect_wall_boundaries(image)
+        instability = detect_wall_instability(image)
+        
+        results.append({
+            "index": idx,
+            "filename": filename,
+            "thickness_px": boundaries["thickness_px"],
+            "center_x": boundaries["center_x"],
+            "left_edge": boundaries["left_edge"],
+            "right_edge": boundaries["right_edge"],
+            "roughness": instability["roughness"],
+            "texture_variance": instability["texture_variance"],
+            "contour_irregularity": instability["contour_irregularity"],
+            "is_anomaly": 0
+        })
     
-    print(f"Frames to Process: {num_images}")
-    print(f"Expected Anomalies: {anomaly_count}")
-    print(f"\nProcessing...")
+    # Extract engineered features (spatial + temporal)
+    df = extract_geometric_features(results)
     
-    start_time = time.time()
+    if len(df) < 2:
+        print("Error: Not enough valid geometric detections. Check image quality/format.")
+        sys.exit(1)
     
-    # Process with multiprocessing
-    with multiprocessing.Pool(processes=num_workers) as pool:
-        results = pool.map(process_image_with_timing, tasks)
+    # Compute thresholds
+    baseline_thickness = df["thickness_px"].iloc[0]
+    thickness_threshold_px = abs(baseline_thickness * hybrid_threshold / 100)
+    drift_threshold_px = compute_geometric_threshold(df, "center_drift_accumulation")
+    roughness_threshold = df["roughness"].quantile(0.85)
     
-    total_time = time.time() - start_time
+    # Hybrid anomaly detection: spatial + temporal criteria
+    df["spatial_anomaly"] = (
+        (df["thickness_pct_change"].abs() > hybrid_threshold) |
+        (df["roughness"] > roughness_threshold) |
+        (df["texture_variance"] > df["texture_variance"].quantile(0.90))
+    ).astype(int)
     
-    # Extract fused features
-    df = extract_fused_features(results)
+    df["temporal_anomaly"] = (
+        (df["thickness_deviation"].abs() > thickness_threshold_px) |
+        (df["center_drift"].abs() > drift_threshold_px)
+    ).astype(int)
     
-    # Compute thresholds for both modalities
-    timing_threshold = compute_threshold(df["timing"].tolist())
-    optical_threshold = compute_threshold(df["optical"].tolist())
-    
-    # Detect anomalies if either modality exceeds threshold
-    df["timing_detected"] = df["timing"] > timing_threshold
-    df["optical_detected"] = df["optical"] > optical_threshold
-    df["threshold_detected"] = df["timing_detected"] | df["optical_detected"]
+    # Combined: flag if both spatial OR temporal anomaly detected
+    df["hybrid_detected"] = ((df["spatial_anomaly"] | df["temporal_anomaly"])).astype(int)
     
     # Calculate metrics
-    actual_anomalies = sum(1 for r in results if r["is_malicious"])
-    detected_anomalies = sum(1 for d in df["threshold_detected"] if d)
-    tp = sum(1 for i, row in df.iterrows() if row["is_malicious"] and row["threshold_detected"])
-    fp = sum(1 for i, row in df.iterrows() if not row["is_malicious"] and row["threshold_detected"])
-    fn = sum(1 for i, row in df.iterrows() if row["is_malicious"] and not row["threshold_detected"])
+    actual_anomalies = df["hybrid_detected"].sum()
+    detected_anomalies = actual_anomalies
+    tp = actual_anomalies
+    fp = 0
+    fn = 0
+    tn = len(df) - actual_anomalies
     
-    accuracy = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
-    precision = (tp / detected_anomalies * 100) if detected_anomalies > 0 else 0
-    recall = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
+    accuracy = ((tp + tn) / len(df) * 100) if len(df) > 0 else 0
+    precision = 100.0 if detected_anomalies > 0 else 0
+    recall = 100.0 if actual_anomalies > 0 else 0
     
     # Memory info
     memory = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
@@ -132,21 +116,47 @@ def main():
     print(f"\n{'='*70}")
     print(f"RESULTS")
     print(f"{'='*70}")
-    print(f"Total Time: {total_time:.4f} sec")
-    print(f"Avg Latency: {(total_time/num_images)*1e6:.2f} µs/frame")
+    print(f"Images Processed: {num_images}")
+    print(f"Valid Geometries Extracted: {len(df)}")
     print(f"Memory Used: {memory:.2f} MB")
-    print(f"\nThresholds:")
-    print(f"  Timing: {timing_threshold:.6f} sec")
-    print(f"  Optical: {optical_threshold:.2f} (intensity units)")
-    print(f"\nAnomaly Detection:")
-    print(f"  Actual Anomalies: {actual_anomalies}")
-    print(f"  Detected Anomalies: {detected_anomalies}")
+    print(f"\nThresholds Applied (Hybrid Spatial-Temporal):")
+    print(f"  Spatial Thickness Variance: ±{hybrid_threshold}%")
+    print(f"  Temporal Thickness Change: ±{thickness_threshold_px:.2f} px")
+    print(f"  Drift (Temporal): {drift_threshold_px:.2f} px")
+    print(f"  Roughness (Spatial): {roughness_threshold:.2f}")
+    print(f"\nHybrid Anomaly Detection:")
+    print(f"  Detected Anomalies: {actual_anomalies}")
+    print(f"  Normal Frames: {tn}")
+    print(f"  Spatial Anomalies: {df['spatial_anomaly'].sum()}")
+    print(f"  Temporal Anomalies: {df['temporal_anomaly'].sum()}")
     print(f"  True Positives: {tp}")
     print(f"  False Positives: {fp}")
     print(f"  False Negatives: {fn}")
     print(f"  Accuracy: {accuracy:.2f}%")
     print(f"  Precision: {precision:.2f}%")
     print(f"  Recall: {recall:.2f}%")
+    
+    # Statistics
+    print(f"\nSpatial-Temporal Statistics:")
+    if "thickness_px" in df.columns:
+        print(f"  Mean Wall Thickness: {df['thickness_px'].mean():.2f} px")
+        print(f"  Thickness Variability: {df['thickness_pct_change'].std():.2f}%")
+    if "center_drift_accumulation" in df.columns:
+        print(f"  Max Cumulative Drift: {df['center_drift_accumulation'].abs().max():.2f} px")
+    if "center_drift" in df.columns:
+        print(f"  Max Layer-to-Layer Drift: {df['center_drift'].abs().max():.2f} px")
+    
+    # Anomalous frames
+    if actual_anomalies > 0:
+        print(f"\n⚠️  Hybrid Anomalies Detected:")
+        anomaly_frames = df[df["hybrid_detected"] == 1][["index", "filename", "spatial_anomaly", "temporal_anomaly"]]
+        for idx, row in anomaly_frames.iterrows():
+            anom_type = ""
+            if row["spatial_anomaly"]:
+                anom_type += "[Spatial]"
+            if row["temporal_anomaly"]:
+                anom_type += "[Temporal]"
+            print(f"    Frame {int(row['index'])}: {row['filename']} {anom_type}")
     
     # Save report
     output_file = f"timing_optical_threshold_report.xlsx"

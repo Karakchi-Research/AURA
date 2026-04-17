@@ -1,58 +1,43 @@
 #!/usr/bin/env python3
 """
-Timing-Only ML Detection Model
-Detects AES anomalies using timing measurements and Random Forest classifier.
-No optical data. No video. Simulated timing + optional injected anomalies.
+Temporal-Dynamics ML Detection Model (LPBF Geometric Monitoring)
+Detects geometric anomalies in LPBF thin-wall fabrication using ML on
+temporal evolution features. Tracks how thickness, drift, and roughness
+change from layer to layer (layer-to-layer dynamics) and uses Random Forest
+to classify anomalous temporal patterns.
+Based on SMASIS2026 paper methodology with temporal analysis.
 """
 
 import sys
 import os
-import time
-import random
-import multiprocessing
 import pandas as pd
 import psutil
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.covariance import EllipticEnvelope
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _utils import (
     load_images_from_directory,
-    simulate_aes_block_with_anomaly,
-    extract_timing_features
+    detect_wall_boundaries,
+    detect_wall_instability,
+    extract_geometric_features
 )
-
-
-def process_image_as_block(args):
-    """
-    Treat each image index as a "data frame" generating one AES block to encrypt.
-    Simulate timing with optional anomaly injection.
-    """
-    image_index, num_images, inject_anomaly = args
-    
-    # Generate synthetic plaintext block (16 bytes)
-    block = bytes([random.randint(0, 255) for _ in range(16)])
-    
-    result = simulate_aes_block_with_anomaly(block, image_index, inject_anomaly)
-    return result
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python timing_ml.py <image_directory> [anomaly_percent] [num_workers]")
-        print("  image_directory: path to folder with optical camera images")
-        print("  anomaly_percent: percentage of blocks to inject anomalies (default: 20)")
-        print("  num_workers: number of CPU cores (default: 4)")
+        print("Usage: python timing_ml.py <image_directory> [temporal_threshold]")
+        print("  image_directory: path to folder with LPBF optical camera images")
+        print("  temporal_threshold: max acceptable layer-to-layer change % (default: 3)")
         sys.exit(1)
     
     image_dir = sys.argv[1]
-    anomaly_percent = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
-    num_workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    temporal_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 3.0
     
-    anomaly_ratio = anomaly_percent / 100.0
-    
-    # Load images to determine dataset size
+    # Load images
     try:
         images = load_images_from_directory(image_dir)
         num_images = len(images)
@@ -61,60 +46,89 @@ def main():
         sys.exit(1)
     
     print(f"\n{'='*70}")
-    print(f"TIMING-ONLY ML DETECTION")
+    print(f"TEMPORAL-DYNAMICS ML DETECTION (LPBF Geometric Monitoring)")
     print(f"{'='*70}")
     print(f"Dataset: {os.path.basename(image_dir)} ({num_images} images)")
-    print(f"Anomaly Rate: {anomaly_percent}%")
-    print(f"Workers: {num_workers}")
+    print(f"Temporal Threshold: ±{temporal_threshold}%")
+    print(f"\nProcessing images...")
     
-    # Generate block processing tasks
-    tasks = []
-    anomaly_count = 0
-    for i in range(num_images):
-        inject = random.random() < anomaly_ratio
-        if inject:
-            anomaly_count += 1
-        tasks.append((i, num_images, inject))
+    # Extract geometric features from images
+    results = []
     
-    print(f"Blocks to Process: {num_images}")
-    print(f"Expected Anomalies: {anomaly_count}")
-    print(f"\nProcessing...")
+    for idx, (filename, image) in enumerate(images):
+        # Detect wall boundaries and instability metrics
+        boundaries = detect_wall_boundaries(image)
+        instability = detect_wall_instability(image)
+        
+        results.append({
+            "index": idx,
+            "filename": filename,
+            "thickness_px": boundaries["thickness_px"],
+            "center_x": boundaries["center_x"],
+            "left_edge": boundaries["left_edge"],
+            "right_edge": boundaries["right_edge"],
+            "roughness": instability["roughness"],
+            "texture_variance": instability["texture_variance"],
+            "contour_irregularity": instability["contour_irregularity"],
+            "is_anomaly": 0
+        })
     
-    start_time = time.time()
+    # Extract engineered features (including temporal dynamics)
+    df = extract_geometric_features(results)
     
-    # Process blocks with multiprocessing
-    with multiprocessing.Pool(processes=num_workers) as pool:
-        results = pool.map(process_image_as_block, tasks)
+    if len(df) < 3:
+        print("Error: Not enough valid geometric detections. Check image quality/format.")
+        sys.exit(1)
     
-    total_time = time.time() - start_time
+    # Set ground truth: anomalies are frames with significant layer-to-layer changes
+    baseline_thickness = df["thickness_px"].iloc[0]
+    df["is_anomaly"] = (
+        (df["thickness_deviation"].abs() > abs(baseline_thickness * temporal_threshold / 100)) |
+        (df["roughness"] > df["roughness"].quantile(0.85))
+    ).astype(int)
     
-    # Extract timing features
-    df = extract_timing_features(results)
+    # Feature selection for ML
+    feature_cols = ["thickness_deviation", "center_drift", "thickness_rolling_std", 
+                    "roughness", "texture_variance", "contour_irregularity"]
+    available_features = [col for col in feature_cols if col in df.columns and df[col].std() > 0]
     
-    # Train/test split
-    X = df.drop(columns=["index", "is_malicious"])
-    y = df["is_malicious"]
+    if not available_features:
+        print("Warning: No feature variance. Using single temporal feature.")
+        available_features = ["thickness_deviation"]
     
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42
-    )
+    X = df[available_features].fillna(0)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
     
-    # Train Random Forest
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    y = df["is_anomaly"]
     
-    # Predict on full dataset
-    y_pred = model.predict(X)
+    # Train model
+    if y.sum() == 0 or y.sum() == len(y):
+        print(f"Warning: No mixed anomaly classes (all {'normal' if y.sum() == 0 else 'anomalous'}).")
+        print("Using unsupervised anomaly detection...")
+        model = EllipticEnvelope(contamination=0.2, random_state=42)
+        model.fit(X_scaled)
+        y_pred = (model.predict(X_scaled) == -1).astype(int)
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.3, random_state=42, stratify=y
+        )
+        
+        model = RandomForestClassifier(n_estimators=100, max_depth=8, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_scaled)
+    
     df["ml_detected"] = y_pred
     
     # Calculate metrics
-    actual_anomalies = sum(1 for r in results if r["is_malicious"])
-    detected_anomalies = sum(1 for pred in y_pred if pred)
-    tp = sum(1 for i, row in df.iterrows() if row["is_malicious"] and row["ml_detected"])
-    fp = sum(1 for i, row in df.iterrows() if not row["is_malicious"] and row["ml_detected"])
-    fn = sum(1 for i, row in df.iterrows() if row["is_malicious"] and not row["ml_detected"])
+    actual_anomalies = df["is_anomaly"].sum()
+    detected_anomalies = df["ml_detected"].sum()
+    tp = sum((df["is_anomaly"] == 1) & (df["ml_detected"] == 1))
+    fp = sum((df["is_anomaly"] == 0) & (df["ml_detected"] == 1))
+    fn = sum((df["is_anomaly"] == 1) & (df["ml_detected"] == 0))
+    tn = sum((df["is_anomaly"] == 0) & (df["ml_detected"] == 0))
     
-    accuracy = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
+    accuracy = ((tp + tn) / len(df) * 100) if len(df) > 0 else 0
     precision = (tp / detected_anomalies * 100) if detected_anomalies > 0 else 0
     recall = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
@@ -122,19 +136,24 @@ def main():
     # Memory info
     memory = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
     
-    # Feature importance
-    feature_importance = pd.DataFrame({
-        "feature": X.columns,
-        "importance": model.feature_importances_
-    }).sort_values("importance", ascending=False)
+    # Feature importance (if available)
+    feature_info = ""
+    if hasattr(model, 'feature_importances_'):
+        feature_importance = pd.DataFrame({
+            "feature": available_features,
+            "importance": model.feature_importances_
+        }).sort_values("importance", ascending=False)
+        feature_info = "\nTop 5 Important Temporal Features:\n"
+        for idx, row in feature_importance.head(5).iterrows():
+            feature_info += f"  {row['feature']}: {row['importance']:.4f}\n"
     
     print(f"\n{'='*70}")
     print(f"RESULTS")
     print(f"{'='*70}")
-    print(f"Total Time: {total_time:.4f} sec")
-    print(f"Avg Latency: {(total_time/num_images)*1e6:.2f} µs/block")
+    print(f"Images Processed: {num_images}")
+    print(f"Valid Geometries Extracted: {len(df)}")
     print(f"Memory Used: {memory:.2f} MB")
-    print(f"\nAnomaly Detection:")
+    print(f"\nTemporal Anomaly Detection:")
     print(f"  Actual Anomalies: {actual_anomalies}")
     print(f"  Detected Anomalies: {detected_anomalies}")
     print(f"  True Positives: {tp}")
@@ -144,9 +163,15 @@ def main():
     print(f"  Precision: {precision:.2f}%")
     print(f"  Recall: {recall:.2f}%")
     print(f"  F1-Score: {f1:.2f}%")
-    print(f"\nTop 5 Important Features:")
-    for idx, row in feature_importance.head(5).iterrows():
-        print(f"  {row['feature']}: {row['importance']:.4f}")
+    print(feature_info)
+    
+    # Temporal statistics
+    print(f"\nTemporal Evolution Statistics:")
+    if "thickness_deviation" in df.columns:
+        print(f"  Max Thickness Change: {df['thickness_deviation'].abs().max():.2f} px")
+        print(f"  Mean Thickness Change: {df['thickness_deviation'].abs().mean():.2f} px")
+    if "center_drift" in df.columns:
+        print(f"  Max Layer-to-Layer Drift: {df['center_drift'].abs().max():.2f} px")
     
     # Save report
     output_file = f"timing_ml_report.xlsx"

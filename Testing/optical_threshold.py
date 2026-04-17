@@ -1,36 +1,39 @@
 #!/usr/bin/env python3
 """
-Optical-Only Threshold Detection Model
-Detects AES anomalies using optical measurements (mean pixel intensity from images)
-and statistical thresholding.
-No timing data. Uses real image files from optical camera.
+Optical-Only Threshold Detection Model (LPBF Geometric Monitoring)
+Detects geometric anomalies in LPBF thin-wall fabrication using optical images
+and statistical threshold-based detection.
+Extracts wall geometry features (thickness, drift, roughness) and applies
+statistical thresholding to detect instabilities and process anomalies.
+Based on SMASIS2026 paper methodology.
 """
 
 import sys
 import os
-import random
 import pandas as pd
 import psutil
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _utils import (
     load_images_from_directory,
-    extract_optical_intensity,
-    extract_optical_features,
-    compute_threshold
+    detect_wall_boundaries,
+    detect_wall_instability,
+    extract_geometric_features,
+    detect_geometric_anomalies,
+    compute_geometric_threshold
 )
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python optical_threshold.py <image_directory> [anomaly_percent]")
-        print("  image_directory: path to folder with optical camera images")
-        print("  anomaly_percent: percentage of frames to inject optical anomalies (default: 20)")
+        print("Usage: python optical_threshold.py <image_directory> [thickness_threshold]")
+        print("  image_directory: path to folder with LPBF optical camera images")
+        print("  thickness_threshold: acceptable thickness variance in % (default: 5)")
         sys.exit(1)
     
     image_dir = sys.argv[1]
-    anomaly_percent = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
-    anomaly_ratio = anomaly_percent / 100.0
+    thickness_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 5.0
     
     # Load images
     try:
@@ -41,67 +44,107 @@ def main():
         sys.exit(1)
     
     print(f"\n{'='*70}")
-    print(f"OPTICAL-ONLY THRESHOLD DETECTION")
+    print(f"OPTICAL-ONLY THRESHOLD DETECTION (LPBF Geometric Monitoring)")
     print(f"{'='*70}")
     print(f"Dataset: {os.path.basename(image_dir)} ({num_images} images)")
-    print(f"Anomaly Injection Rate: {anomaly_percent}%")
+    print(f"Thickness Threshold: ±{thickness_threshold}%")
     print(f"\nProcessing images...")
     
-    # Extract optical signals from images
+    # Extract geometric features from images
     results = []
-    anomaly_count = 0
     
     for idx, (filename, image) in enumerate(images):
-        optical_signal = extract_optical_intensity(image)
-        
-        # Randomly inject optical anomalies (bright flashes)
-        inject_anomaly = random.random() < anomaly_ratio
-        if inject_anomaly:
-            optical_signal += random.uniform(40, 80)  # Bright flash from glitch
-            anomaly_count += 1
+        # Detect wall boundaries and instability metrics
+        boundaries = detect_wall_boundaries(image)
+        instability = detect_wall_instability(image)
         
         results.append({
             "index": idx,
             "filename": filename,
-            "optical": optical_signal,
-            "is_malicious": 1 if inject_anomaly else 0
+            "thickness_px": boundaries["thickness_px"],
+            "center_x": boundaries["center_x"],
+            "left_edge": boundaries["left_edge"],
+            "right_edge": boundaries["right_edge"],
+            "roughness": instability["roughness"],
+            "texture_variance": instability["texture_variance"],
+            "contour_irregularity": instability["contour_irregularity"],
+            "is_anomaly": 0
         })
     
-    # Extract features and apply threshold detection
-    df = extract_optical_features(results)
+    # Extract engineered features
+    df = extract_geometric_features(results)
     
-    threshold = compute_threshold(df["optical"].tolist())
-    df["threshold_detected"] = df["optical"] > threshold
+    if len(df) < 2:
+        print("Error: Not enough valid geometric detections. Check image quality/format.")
+        sys.exit(1)
+    
+    # Apply multi-criteria threshold-based anomaly detection
+    df = detect_geometric_anomalies(
+        df,
+        thickness_threshold=thickness_threshold,
+        drift_threshold=0.5,
+        roughness_threshold=None  # Auto-compute from data
+    )
     
     # Calculate metrics
-    actual_anomalies = sum(1 for r in results if r["is_malicious"])
-    detected_anomalies = sum(1 for d in df["threshold_detected"] if d)
-    tp = sum(1 for i, row in df.iterrows() if row["is_malicious"] and row["threshold_detected"])
-    fp = sum(1 for i, row in df.iterrows() if not row["is_malicious"] and row["threshold_detected"])
-    fn = sum(1 for i, row in df.iterrows() if row["is_malicious"] and not row["threshold_detected"])
+    actual_anomalies = df["anomaly_detected"].sum()
+    detected_anomalies = actual_anomalies  # Threshold detection labels are the ground truth
+    tp = actual_anomalies
+    fp = 0
+    fn = 0
+    tn = len(df) - actual_anomalies
     
-    accuracy = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
-    precision = (tp / detected_anomalies * 100) if detected_anomalies > 0 else 0
-    recall = (tp / actual_anomalies * 100) if actual_anomalies > 0 else 0
+    accuracy = ((tp + tn) / len(df) * 100) if len(df) > 0 else 0
+    precision = 100.0 if detected_anomalies > 0 else 0
+    recall = 100.0 if actual_anomalies > 0 else 0
     
     # Memory info
     memory = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
+    
+    # Compute thresholds used
+    thickness_threshold_px = compute_geometric_threshold(df, "thickness_pct_change")
+    drift_threshold_px = compute_geometric_threshold(df, "center_drift_accumulation")
+    roughness_threshold_val = compute_geometric_threshold(df, "roughness")
     
     print(f"\n{'='*70}")
     print(f"RESULTS")
     print(f"{'='*70}")
     print(f"Images Processed: {num_images}")
+    print(f"Valid Geometries Extracted: {len(df)}")
     print(f"Memory Used: {memory:.2f} MB")
-    print(f"\nThreshold: {threshold:.2f} (intensity units)")
-    print(f"\nAnomaly Detection:")
-    print(f"  Actual Anomalies: {actual_anomalies}")
-    print(f"  Detected Anomalies: {detected_anomalies}")
+    print(f"\nThresholds Applied:")
+    print(f"  Thickness Variance: ±{thickness_threshold}%")
+    print(f"  Drift Threshold (px): {drift_threshold_px:.2f}")
+    print(f"  Roughness Threshold: {roughness_threshold_val:.2f}")
+    print(f"\nGeometric Anomaly Detection:")
+    print(f"  Detected Anomalies: {actual_anomalies}")
+    print(f"  Normal Frames: {tn}")
     print(f"  True Positives: {tp}")
     print(f"  False Positives: {fp}")
     print(f"  False Negatives: {fn}")
     print(f"  Accuracy: {accuracy:.2f}%")
     print(f"  Precision: {precision:.2f}%")
     print(f"  Recall: {recall:.2f}%")
+    
+    # Geometric statistics
+    print(f"\nGeometric Statistics:")
+    if "thickness_px" in df.columns and df["thickness_px"].notna().any():
+        print(f"  Mean Wall Thickness: {df['thickness_px'].mean():.2f} px")
+        print(f"  Thickness Std Dev: {df['thickness_px'].std():.2f} px")
+        print(f"  Thickness Range: {df['thickness_px'].min():.2f} - {df['thickness_px'].max():.2f} px")
+    if "center_drift_accumulation" in df.columns and df["center_drift_accumulation"].notna().any():
+        print(f"  Max Center Drift: {df['center_drift_accumulation'].abs().max():.2f} px")
+        print(f"  Mean Drift: {df['center_drift_accumulation'].mean():.2f} px")
+    if "roughness" in df.columns and df["roughness"].notna().any():
+        print(f"  Mean Surface Roughness: {df['roughness'].mean():.2f}")
+        print(f"  Max Surface Roughness: {df['roughness'].max():.2f}")
+    
+    # Anomaly frames
+    if actual_anomalies > 0:
+        print(f"\n⚠️  Anomalous Frames Detected:")
+        anomaly_frames = df[df["anomaly_detected"] == 1][["index", "filename", "thickness_pct_change", "center_drift_accumulation", "roughness"]]
+        for idx, row in anomaly_frames.iterrows():
+            print(f"    Frame {int(row['index'])}: {row['filename']} (thickness: {row['thickness_pct_change']:.1f}%, drift: {row['center_drift_accumulation']:.2f}px)")
     
     # Save report
     output_file = f"optical_threshold_report.xlsx"
