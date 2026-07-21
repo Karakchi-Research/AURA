@@ -173,6 +173,6 @@ AURA/
 
 This work was supported under the **McNair Junior Fellowship** and **Magellan Scholar Program** at the University of South Carolina.
 
-Special thanks to **Rye Stahle-Smith** for hardware testing and experimental support on LPBF systems.
+Special thanks to **Rye Stahle-Smith** for hardware testing and experimental support.
 
 ---
