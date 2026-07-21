@@ -143,7 +143,7 @@ python3 thermal_adapter.py "/path/to/Laser Welds.mp4"
 - Run the selected anomaly detection mode
 - Generate an Excel report
 
-#### Output will be saved as `<video_name>\_thermal_report.xlsx
+#### Output will be saved as `<video_name>\_thermal_report.xlsx`
 
 ---
 
