@@ -70,7 +70,7 @@ Structured anomaly report
 1. **Clone the Repository**:
 
    ```bash
-   git clone https://github.com/nishant640/AURA.git
+   git clone https://github.com/Karakchi-Research/AURA.git
    cd AURA
    ```
 
