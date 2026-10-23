@@ -45,7 +45,7 @@ On Windows, activate the virtual environment with:
 ## Running the Complete Benchmark
 
 The video dataset is distributed separately because of its size. Download
-`AURA_Dataset.tar.gz` from the project’s **Releases** page and place it in the
+`AURA_Dataset.tar.gz` from the project’s [Releases](https://github.com/Karakchi-Research/AURA/releases/tag/v1.0.0) page and place it in the
 repository root. Extract it before using the tool:
 
 ```bash
@@ -140,8 +140,8 @@ They are not included in `run.sh`.
 
 ## Credits
 
-**Developed by:** Nishant Chinnasami
-**Advisor:** Dr. Rasha Karakchi
+**Developed by:** Nishant Chinnasami<br>
+**Advisor:** Dr. Rasha Karakchi<br>
 **Institution:** University of South Carolina
 
 This work was supported under the McNair Junior Fellowship and Magellan Scholar
