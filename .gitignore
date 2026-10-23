@@ -1,6 +1,7 @@
 __pycache__/
 *.xlsx
 *.zip
+*.tar*
 *.raw
 *.tmp_index
 *.bias
