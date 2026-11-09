@@ -33,7 +33,7 @@ def process_block(args):
     modified_block = list(block)
 
     # Base sensor (simulated hardware baseline)
-    base_optical = 100  # Celsius
+    base_optical = 100  # Intensity units
 
     # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)

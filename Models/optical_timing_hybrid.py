@@ -48,7 +48,6 @@ def process_block(args):
 
     return {
         "timing": end_time - start_time,
-        "thermal": base_thermal + random.uniform(-0.5, 0.5),
         "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
         "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
