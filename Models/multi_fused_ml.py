@@ -23,42 +23,40 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting timing, thermal, and optical features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing sensor features and the malicious label.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
     # Base sensors (simulated hardware baselines)
-    base_temp = 35.0  # Celsius
+    base_thermal = 35.0  # Celsius
     base_optical = 100  # Intensity units
 
     # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        anomaly_type = random.choice(["delay", "fault", "stealth"])
-        if anomaly_type == "delay":
+        anomaly_type = random.choice(["timing_delay", "thermal_spike", "optical_burst"])
+        if anomaly_type == "timing_delay":
             time.sleep(random.uniform(0.005, 0.01))
-            base_temp -= 2.0  # Throttling/idle cooling
-        elif anomaly_type == "fault":
+        elif anomaly_type == "thermal_spike":
+            base_thermal += 8.0  # High thermal spike
             modified_block[0] ^= 0xFF
-            base_temp += 8.0  # Thermal spike
+        else:
             base_optical += 50  # Optical burst
-        else:  # Subtle anomalies that stay near thresholds
-            base_temp += 1.5
-            base_optical += 5.0
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "index": index,
         "timing": end_time - start_time,
-        "thermal": base_temp + random.uniform(-0.5, 0.5),  # Add noise
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
         "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -98,7 +96,7 @@ def run_on_file(file_path):
     train_df, test_df = df.iloc[:split], df.iloc[split:]
 
     # 3. Train a Random Forest classifier on the sensor features
-    features = ["timing", "thermal", "optical"]
+    features = ["timing", "thermal", "optical", "hamming_weight"]
     rf = RandomForestClassifier(n_estimators=100, random_state=42)
     rf.fit(train_df[features], train_df["is_malicious"])
 

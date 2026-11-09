@@ -61,7 +61,7 @@ This restores the `Dataset/` directory used by the models. Then run:
 The runner:
 
 1. Finds every `.mp4`, `.avi`, and `.ravi` file in `Dataset/`.
-2. Runs all 13 refined models in `Models/` against each file.
+2. Runs all 21 refined models in `Models/` against each file.
 3. Limits each model to `MAX_BLOCKS` (Default: 10,000 blocks).
 4. Writes one log per model and dataset file to `logs/`.
 5. Writes summaries, predictions, and Excel reports to `results/`.
@@ -82,23 +82,32 @@ Available models:
 | Model | Detection approach | Features |
 | --- | --- | --- |
 | `only_optical_ml.py` | ML | Optical |
-| `only_thermal_ml.py` | ML | Thermal |
-| `optical_timing_ml.py` | ML | Optical, timing |
-| `optical_thermal_ml.py` | ML | Optical, thermal |
-| `thermal_timing_ml.py` | ML | Thermal, timing |
-| `multi_fused_ml.py` | ML | Optical, thermal, timing |
 | `only_optical_threshold.py` | Threshold | Optical |
-| `optical_timing_threshold.py` | Threshold | Optical, timing |
-| `optical_thermal_threshold.py` | Threshold | Optical, thermal |
-| `thermal_timing_threshold.py` | Threshold | Thermal, timing |
-| `multi_fused_threshold.py` | Threshold | Optical, thermal, timing |
+| `only_optical_hybrid.py` | Hybrid | Optical |
+| `only_thermal_ml.py` | ML | Thermal |
+| `only_thermal_threshold.py` | Threshold | Thermal |
+| `only_thermal_hybrid.py` | Hybrid | Thermal |
+| `only_timing_ml.py` | ML | Timing |
+| `only_timing_threshold.py` | Threshold | Timing |
 | `only_timing_hybrid.py` | Hybrid | Timing |
+| `optical_timing_ml.py` | ML | Optical, timing |
+| `optical_timing_threshold.py` | Threshold | Optical, timing |
+| `optical_timing_hybrid.py` | Hybrid | Optical, timing |
+| `optical_thermal_ml.py` | ML | Optical, thermal |
+| `optical_thermal_threshold.py` | Threshold | Optical, thermal |
+| `optical_thermal_hybrid.py` | Hybrid | Optical, thermal |
+| `thermal_timing_ml.py` | ML | Thermal, timing |
+| `thermal_timing_threshold.py` | Threshold | Thermal, timing |
+| `thermal_timing_hybrid.py` | Hybrid | Thermal, timing |
+| `multi_fused_ml.py` | ML | Optical, thermal, timing |
+| `multi_fused_threshold.py` | Threshold | Optical, thermal, timing |
 | `multi_fused_hybrid.py` | Hybrid | Optical, thermal, timing |
 
 Threshold and hybrid models use a `calculate_thresholds()` method to derive
-baseline thresholds. ML models train a `RandomForestClassifier` on their
-declared feature set. All models use the same 10,000-block processing limit
-and shared summary helpers.
+baseline thresholds. ML and hybrid models train a `RandomForestClassifier` on
+their declared feature set. Hybrid models report an anomaly when either the
+threshold detector or the ML classifier triggers. All models use the same
+10,000-block processing limit and shared summary helpers.
 
 ## Outputs
 

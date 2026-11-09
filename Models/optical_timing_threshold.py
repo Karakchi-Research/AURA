@@ -21,34 +21,35 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting optical and timing features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical, timing, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Base Optical Level + Data-dependent Hamming Weight (HW)
-    base_optical = 100
+    # Base sensor (simulated hardware baselines)
+    base_optical = 100  # Intensity units
+
+    # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)
-    current_optical = base_optical + (hw * 0.5) + random.uniform(-1, 1)
 
     if inject_anomaly:
-        anomaly_choice = random.choice(["delay", "fault"])
-        if anomaly_choice == "delay":
-            time.sleep(random.uniform(0.005, 0.02))  # Timing Anomaly
+        anomaly_type = random.choice(["timing_delay", "optical_burst"])
+        if anomaly_type == "timing_delay":
+            time.sleep(random.uniform(0.005, 0.01))
         else:
-            current_optical += random.uniform(30, 60)  # Optical Anomaly
-            modified_block = [b ^ 0xFF for b in modified_block]
+            base_optical += 50  # Optical burst
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "index": index,
-        "time": end_time - start_time,
-        "optical": current_optical,
+        "timing": end_time - start_time,
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -60,7 +61,7 @@ def process_block(args):
 # @return A dictionary containing one threshold per sensor.
 def calculate_thresholds(results):
     thresholds = {}
-    for sensor in ["time", "optical"]:
+    for sensor in ["time", "optical", "hamming_weight"]:
         values = [result[sensor] for result in results]
         mean = sum(values) / len(values)
         sigma = (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
@@ -107,7 +108,11 @@ def run_on_file(file_path):
     tp, fp, fn, tn = 0, 0, 0, 0
     for r in results[split:]:
         # Detect if EITHER channel triggers
-        detected = r["time"] > thresh["time"] or r["optical"] > thresh["optical"]
+        detected = (
+            r["time"] > thresh["time"]
+            or r["optical"] > thresh["optical"]
+            or r["hamming_weight"] > thresh["hamming_weight"]
+        )
 
         if r["is_malicious"] and detected:
             tp += 1

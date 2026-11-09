@@ -9,11 +9,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
 BLOCK_SIZE = 16
-KEY = b'ThisIsA16ByteKey'
+KEY = b"ThisIsA16ByteKey"
 
 
 def aes_encrypt_block_with_anomaly(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
     start_time = time.time()
 
     anomaly_type = None
@@ -41,7 +41,7 @@ def aes_encrypt_block_with_anomaly(args):
         "original_block": block,
         "encrypted_block": list(ciphertext),
         "anomaly_type": anomaly_type,
-        "time": end_time - start_time
+        "time": end_time - start_time,
     }
 
 
@@ -65,7 +65,7 @@ def extract_features(results):
         delta_next = next_time - r["time"]
 
         window_start = max(0, i - 2)
-        window = times[window_start:i + 1]
+        window = times[window_start : i + 1]
         rolling_mean = sum(window) / len(window)
         rolling_std = pd.Series(window).std()
         if pd.isna(rolling_std):
@@ -79,7 +79,7 @@ def extract_features(results):
             "delta_next": delta_next,
             "rolling_mean": rolling_mean,
             "rolling_std": float(rolling_std),
-            "actual_label": 1 if r.get("anomaly_type") else 0
+            "actual_label": 1 if r.get("anomaly_type") else 0,
         }
 
         if "original_block" in r:
@@ -126,11 +126,15 @@ def ml_detect(results):
 
 def main():
     num_blocks = int(input("Enter number of plaintext blocks to encrypt: "))
-    malicious_percent = float(input("Enter percentage of malicious blocks to inject (0-100): "))
+    malicious_percent = float(
+        input("Enter percentage of malicious blocks to inject (0-100): ")
+    )
     anomaly_ratio = malicious_percent / 100.0
     num_cores = int(input("Enter number of CPU cores to use: "))
 
-    print(f"\nEncrypting {num_blocks} blocks with {malicious_percent}% malicious blocks using {num_cores} cores...\n")
+    print(
+        f"\nEncrypting {num_blocks} blocks with {malicious_percent}% malicious blocks using {num_cores} cores...\n"
+    )
 
     start_time = time.time()
     blocks = generate_blocks(num_blocks, anomaly_ratio)
@@ -141,7 +145,7 @@ def main():
     total_time = time.time() - start_time
     avg_latency = total_time / num_blocks
     throughput = num_blocks / total_time
-    memory_used = round(psutil.Process().memory_info().rss / (1024 ** 2), 2)
+    memory_used = round(psutil.Process().memory_info().rss / (1024**2), 2)
 
     print("\n🕒 Performance Metrics")
     print(f"Total time: {total_time:.4f} sec")

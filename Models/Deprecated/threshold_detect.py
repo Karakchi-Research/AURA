@@ -5,7 +5,7 @@ import multiprocessing
 from Crypto.Cipher import AES
 
 BLOCK_SIZE = 16
-KEY = b'ThisIsA16ByteKey'
+KEY = b"ThisIsA16ByteKey"
 
 
 def aes_encrypt_block_with_anomaly(args):
@@ -37,7 +37,7 @@ def aes_encrypt_block_with_anomaly(args):
         "original_block": block,
         "encrypted_block": list(ciphertext),
         "anomaly_type": anomaly_type,
-        "time": end_time - start_time
+        "time": end_time - start_time,
     }
 
 
@@ -65,11 +65,15 @@ def detect_anomalies(results):
 
 def main():
     num_blocks = int(input("Enter number of plaintext blocks to encrypt: "))
-    malicious_percent = float(input("Enter percentage of malicious blocks to inject (0-100): "))
+    malicious_percent = float(
+        input("Enter percentage of malicious blocks to inject (0-100): ")
+    )
     anomaly_ratio = malicious_percent / 100.0
     num_cores = int(input("Enter number of CPU cores to use: "))
 
-    print(f"\nEncrypting {num_blocks} blocks with {malicious_percent}% malicious blocks using {num_cores} cores...\n")
+    print(
+        f"\nEncrypting {num_blocks} blocks with {malicious_percent}% malicious blocks using {num_cores} cores...\n"
+    )
 
     blocks = generate_blocks(num_blocks, anomaly_ratio)
 
@@ -80,11 +84,19 @@ def main():
 
     malicious_actual = sum(1 for r in results if r["anomaly_type"] is not None)
     malicious_detected = sum(1 for r in results if r["threshold_detected"])
-    correct_detections = sum(1 for r in results if r["anomaly_type"] and r["threshold_detected"])
-    false_positives = sum(1 for r in results if r["anomaly_type"] is None and r["threshold_detected"])
-    false_negatives = sum(1 for r in results if r["anomaly_type"] and not r["threshold_detected"])
+    correct_detections = sum(
+        1 for r in results if r["anomaly_type"] and r["threshold_detected"]
+    )
+    false_positives = sum(
+        1 for r in results if r["anomaly_type"] is None and r["threshold_detected"]
+    )
+    false_negatives = sum(
+        1 for r in results if r["anomaly_type"] and not r["threshold_detected"]
+    )
 
-    accuracy = correct_detections / malicious_actual * 100 if malicious_actual > 0 else 0
+    accuracy = (
+        correct_detections / malicious_actual * 100 if malicious_actual > 0 else 0
+    )
 
     print("\n🔒 Anomaly Detection Summary")
     print(f"Total Blocks: {num_blocks}")
@@ -99,13 +111,17 @@ def main():
     print("\n📄 Sample Benign Block:")
     for r in results:
         if r["anomaly_type"] is None:
-            print(f"Index: {r['index']}\nPlain: {r['original_block']}\nCipher: {r['encrypted_block']}\nTime: {r['time']:.6f}s")
+            print(
+                f"Index: {r['index']}\nPlain: {r['original_block']}\nCipher: {r['encrypted_block']}\nTime: {r['time']:.6f}s"
+            )
             break
 
     print("\n📄 Sample Malicious Block:")
     for r in results:
         if r["anomaly_type"] is not None:
-            print(f"Index: {r['index']}\nPlain: {r['original_block']}\nCipher: {r['encrypted_block']}\nTime: {r['time']:.6f}s\nType: {r['anomaly_type']}")
+            print(
+                f"Index: {r['index']}\nPlain: {r['original_block']}\nCipher: {r['encrypted_block']}\nTime: {r['time']:.6f}s\nType: {r['anomaly_type']}"
+            )
             break
 
     df = pd.DataFrame(results)

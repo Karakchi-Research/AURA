@@ -23,40 +23,38 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting optical and thermal features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical, thermal, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # 1. Optical sensor simulation: base + Hamming Weight (HW) + noise
-    base_opt = 100
-    hw = sum(bin(b).count("1") for b in block)
-    current_opt = base_opt + (hw * 0.5) + random.uniform(-1, 1)
+    # Base sensors (simulated hardware baselines)
+    base_thermal = 35.0  # Celsius
+    base_optical = 100  # Intensity units
 
-    # 2. Thermal sensor simulation: base temperature + fluctuation
-    base_temp = 38.0
-    current_temp = base_temp + random.uniform(-0.3, 0.3)
+    # Hamming Weight (count of '1' bits in the block)
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        # Choose which sensor the attack targets
-        attack_type = random.choice(["thermal_glitch", "optical_laser"])
-        if attack_type == "thermal_glitch":
-            current_temp += random.uniform(7.0, 15.0)  # Heat spike
+        anomaly_type = random.choice(["thermal_spike", "optical_burst"])
+        if anomaly_type == "thermal_spike":
+            base_thermal += 8.0  # High thermal spike
+            modified_block[0] ^= 0xFF
         else:
-            current_opt += random.uniform(40, 80)  # Light burst
-        modified_block[0] ^= 0xFF  # Fault injection
+            base_optical += 50  # Optical burst
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "thermal_sig": current_temp,
-        "optical_sig": current_opt,
+        "timing": end_time - start_time,
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
         "hamming_weight": hw,
-        "latency": end_time - start_time,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 

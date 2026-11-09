@@ -21,42 +21,38 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting optical and thermal features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical, thermal, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # 1. SIMULATE OPTICAL SENSOR (Based on Hamming Weight)
-    # HW represents light intensity emitted during data processing
-    base_optical = 100
-    hw = sum(bin(b).count("1") for b in block)
-    current_optical = base_optical + (hw * 0.5) + random.uniform(-1, 1)
+    # Base sensors (simulated hardware baselines)
+    base_thermal = 35.0  # Celsius
+    base_optical = 100  # Intensity units
 
-    # 2. SIMULATE THERMAL SENSOR (Celsius)
-    base_temp = 38.0
-    current_temp = base_temp + random.uniform(-0.3, 0.3)
+    # Hamming Weight (count of '1' bits in the block)
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        # Randomly choose between a Thermal spike or an Optical burst
-        anomaly_choice = random.choice(["thermal_spike", "optical_burst"])
-        if anomaly_choice == "thermal_spike":
-            current_temp += random.uniform(8.0, 15.0)  # Thermal spike (e.g. fault)
+        anomaly_type = random.choice(["thermal_spike", "optical_burst"])
+        if anomaly_type == "thermal_spike":
+            base_thermal += 8.0  # High thermal spike
             modified_block[0] ^= 0xFF
         else:
-            current_optical += random.uniform(40, 70)  # Optical burst (e.g. laser)
+            base_optical += 50  # Optical burst
 
-    # Standard AES Encryption
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "index": index,
-        "optical": current_optical,
-        "thermal": current_temp,
-        "time": end_time - start_time,
+        "timing": end_time - start_time,
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -68,7 +64,7 @@ def process_block(args):
 # @return A dictionary containing one threshold per sensor.
 def calculate_thresholds(results):
     thresholds = {}
-    for sensor in ["optical", "thermal"]:
+    for sensor in ["optical", "thermal", "hamming_weight"]:
         vals = [r[sensor] for r in results]
         mu = sum(vals) / len(vals)
         sigma = (sum((v - mu) ** 2 for v in vals) / len(vals)) ** 0.5
@@ -114,7 +110,9 @@ def run_on_file(file_path):
     for r in results[split:]:
         # Detect if EITHER Optical OR Thermal sensor exceeds threshold
         detected = (
-            r["optical"] > thresholds["optical"] or r["thermal"] > thresholds["thermal"]
+            r["optical"] > thresholds["optical"]
+            or r["thermal"] > thresholds["thermal"]
+            or r["hamming_weight"] > thresholds["hamming_weight"]
         )
 
         if r["is_malicious"] and detected:
@@ -144,6 +142,7 @@ def run_on_file(file_path):
         row["predicted_label"] = int(
             row["optical"] > thresholds["optical"]
             or row["thermal"] > thresholds["thermal"]
+            or row["hamming_weight"] > thresholds["hamming_weight"]
         )
     pd.DataFrame(predictions).to_csv(
         os.path.join(

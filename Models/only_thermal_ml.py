@@ -23,31 +23,35 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting the thermal feature.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing thermal features and the malicious label.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Simulated Thermal Feature (Celsius)
-    # Base temp fluctuates slightly with background noise
-    base_temp = 38.0
-    current_temp = base_temp + random.uniform(-0.3, 0.3)
+    # Base sensor (simulated hardware baseline)
+    base_thermal = 38.0  # Celsius
+
+    # Hamming Weight (count of '1' bits in the block)
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        # Simulate a thermal spike caused by a hardware fault/glitch
-        # Attacks like voltage glitching or EM injection create localized heat
-        current_temp += random.uniform(5.0, 12.0)
-        modified_block[0] ^= 0xFF
+        # Simulate a thermal spike anomaly.
+        anomaly = random.choice(["thermal_spike"])
+        if anomaly == "thermal_spike":
+            base_thermal += 8.0  # Thermal spike
+            modified_block[0] ^= 0xFF
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "thermal_signature": current_temp,
-        "latency": end_time - start_time,
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
+        "hamming_weight": hw,
+        "timing": end_time - start_time,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -85,7 +89,7 @@ def run_on_file(file_path):
     df = pd.DataFrame(results)
 
     # Feature: Only Thermal Signature
-    X = df[["thermal_signature"]]
+    X = df[["thermal_signature", "hamming_weight"]]
     y = df["is_malicious"]
 
     # 30% Train (to learn thermal baseline) / 70% Test

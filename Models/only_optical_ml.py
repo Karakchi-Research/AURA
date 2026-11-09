@@ -23,23 +23,23 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting the optical feature.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical features and the malicious label.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Simulated Optical Signal: Base + Hamming Weight (HW)
-    base_optical = 100
+    # Base sensor (simulated hardware baseline)
+    base_optical = 100  # Celsius
+
+    # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)
 
-    # Optical signature = Base + Data-dependent emission + Noise
-    current_optical = base_optical + (hw * 0.5) + random.uniform(-1, 1)
-
     if inject_anomaly:
-        # Simulate Optical Signature of a Fault Attack (Burst)
-        current_optical += random.uniform(30, 60)
+        # Simulate an optical burst anomaly.
+        base_optical += 50  # Optical burst
         modified_block[0] ^= 0xFF
 
     cipher = AES.new(KEY, AES.MODE_ECB)
@@ -47,9 +47,9 @@ def process_block(args):
     end_time = time.perf_counter()
 
     return {
-        "optical_signal": current_optical,
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
         "hamming_weight": hw,
-        "latency": end_time - start_time,
+        "timing": end_time - start_time,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 

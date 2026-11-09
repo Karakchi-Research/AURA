@@ -21,20 +21,17 @@ MAX_BLOCKS = 10000
 
 
 # process_block()
-# Process a single block of data, simulating timing anomalies and measuring latency.
+# Process a single block, extracting the timing feature.
 #
-# @param args - A tuple containing a block of data and a boolean indicating whether to inject an anomaly.
-# @return A dictionary containing a timing feature and a label indicating if the block is malicious.
+# @param args - A tuple containing a block and an anomaly flag.
+# @return A dictionary containing timing features and the malicious label.
 def process_block(args):
     block, inject_anomaly = args
     start_time = time.perf_counter()
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        attack_type = random.choice(["spike", "stealth"])
-        if attack_type == "spike":
-            time.sleep(random.uniform(0.01, 0.02))  # Obvious delay
-        else:
-            time.sleep(random.uniform(0.001, 0.003))  # Subtle shift
+        time.sleep(random.uniform(0.005, 0.01))  # Timing delay
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(block)
@@ -42,6 +39,7 @@ def process_block(args):
 
     return {
         "timing": end_time - start_time,
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -99,12 +97,12 @@ def run_on_file(file_path):
 
     # 3. Train a Random Forest classifier on the timing feature
     rf = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf.fit(train_df[["timing"]], train_df["is_malicious"])
+    rf.fit(train_df[["timing", "hamming_weight"]], train_df["is_malicious"])
 
     # 4. Detect anomalies in the test set using both methods
     start_bench = time.perf_counter()
     thresh_hits = test_df["timing"] > threshold
-    ml_hits = rf.predict(test_df[["timing"]])
+    ml_hits = rf.predict(test_df[["timing", "hamming_weight"]])
     end_bench = time.perf_counter()
 
     y_pred_hybrid = (thresh_hits.values | ml_hits.astype(bool)).astype(int)

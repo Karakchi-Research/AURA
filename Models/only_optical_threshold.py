@@ -21,24 +21,23 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting the optical feature.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical features and the malicious label.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Base Optical Level + Hamming Weight (HW) simulation
-    # HW represents the number of '1' bits in the data block
-    base_optical = 100
+    # Base sensor (simulated hardware baseline)
+    base_optical = 100  # Celsius
+
+    # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)
 
-    # Current optical signature = Base + Data-dependent emission + Noise
-    current_optical = base_optical + (hw * 0.5) + random.uniform(-1, 1)
-
     if inject_anomaly:
-        # Simulate an Optical Flash/Burst caused by a Fault Injection (e.g., Laser)
-        current_optical += 50
+        # Simulate an optical burst anomaly.
+        base_optical += 50  # Optical burst
         modified_block[0] ^= 0xFF
 
     cipher = AES.new(KEY, AES.MODE_ECB)
@@ -46,9 +45,9 @@ def process_block(args):
     end_time = time.perf_counter()
 
     return {
-        "index": index,
-        "optical": current_optical,
-        "time": end_time - start_time,
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
+        "hamming_weight": hw,
+        "timing": end_time - start_time,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -60,9 +59,18 @@ def process_block(args):
 # @return A dictionary containing the optical threshold.
 def calculate_thresholds(results):
     values = [result["optical"] for result in results]
+    hamming_values = [result["hamming_weight"] for result in results]
     mean = sum(values) / len(values)
     sigma = (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
-    return {"optical": mean + (3.0 * sigma)}
+    hamming_mean = sum(hamming_values) / len(hamming_values)
+    hamming_sigma = (
+        sum((value - hamming_mean) ** 2 for value in hamming_values)
+        / len(hamming_values)
+    ) ** 0.5
+    return {
+        "optical": mean + (3.0 * sigma),
+        "hamming_weight": hamming_mean + (3.0 * hamming_sigma),
+    }
 
 
 # run_on_file()
@@ -105,7 +113,10 @@ def run_on_file(file_path):
 
     for r in test_data:
         # Binary Decision based ONLY on Optical Sensor
-        detected = r["optical"] > threshold_opt
+        detected = (
+            r["optical"] > threshold_opt
+            or r["hamming_weight"] > thresholds["hamming_weight"]
+        )
 
         if r["is_malicious"] and detected:
             tp += 1
@@ -131,7 +142,10 @@ def run_on_file(file_path):
     base = os.path.splitext(os.path.basename(file_path))[0]
     predictions = results[split:]
     for row in predictions:
-        row["predicted_label"] = int(row["optical"] > threshold_opt)
+        row["predicted_label"] = int(
+            row["optical"] > threshold_opt
+            or row["hamming_weight"] > thresholds["hamming_weight"]
+        )
     pd.DataFrame(predictions).to_csv(
         os.path.join(out_dir, "only_optical_threshold_{}_predictions.csv".format(base)),
         index=False,

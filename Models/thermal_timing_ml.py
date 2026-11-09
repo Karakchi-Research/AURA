@@ -23,24 +23,26 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting timing and thermal features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing timing, thermal, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Simulated thermal signal
-    base_temp = 38.0
-    current_temp = base_temp + random.uniform(-0.3, 0.3)
+    # Base sensors (simulated hardware baselines)
+    base_thermal = 35.0  # Celsius
+
+    # Hamming Weight (count of '1' bits in the block)
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        anomaly = random.choice(["timing_delay", "thermal_spike"])
-
-        if anomaly == "timing_delay":
-            time.sleep(random.uniform(0.005, 0.02))
+        anomaly_type = random.choice(["timing_delay", "thermal_spike"])
+        if anomaly_type == "timing_delay":
+            time.sleep(random.uniform(0.005, 0.01))
         else:
-            current_temp += random.uniform(8.0, 15.0)
+            base_thermal += 8.0  # High thermal spike
             modified_block[0] ^= 0xFF
 
     cipher = AES.new(KEY, AES.MODE_ECB)
@@ -48,9 +50,9 @@ def process_block(args):
     end_time = time.perf_counter()
 
     return {
-        "index": index,
-        "latency": end_time - start_time,
-        "thermal": current_temp,
+        "timing": end_time - start_time,
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -89,7 +91,7 @@ def run_on_file(file_path):
     df = pd.DataFrame(results)
 
     # 2. Prepare the dataset
-    features = ["latency", "thermal"]
+    features = ["latency", "thermal", "hamming_weight"]
     X = df[features]
     y = df["is_malicious"]
 

@@ -23,33 +23,35 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting optical and timing features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing optical, timing, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
+
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    # Simulated optical signal: base + Hamming Weight (HW)
-    base_optical = 100
+    # Base sensor (simulated hardware baselines)
+    base_optical = 100  # Intensity units
+
+    # Hamming Weight (count of '1' bits in the block)
     hw = sum(bin(b).count("1") for b in block)
 
-    # Optical signature = base + data-dependent emission + noise
-    current_optical = base_optical + (hw * 0.5) + random.uniform(-1, 1)
-
     if inject_anomaly:
-        # Optical signature of a fault attack (burst)
-        current_optical += random.uniform(30, 60)
-        modified_block[0] ^= 0xFF
+        anomaly_type = random.choice(["timing_delay", "optical_burst"])
+        if anomaly_type == "timing_delay":
+            time.sleep(random.uniform(0.005, 0.01))
+        else:
+            base_optical += 50  # Optical burst
 
     cipher = AES.new(KEY, AES.MODE_ECB)
     cipher.encrypt(bytes(modified_block))
     end_time = time.perf_counter()
 
     return {
-        "optical_signal": current_optical,
+        "timing": end_time - start_time,
+        "optical": base_optical + (hw * 0.5) + random.uniform(-2, 2),
         "hamming_weight": hw,
-        "latency": end_time - start_time,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -89,7 +91,7 @@ def run_on_file(file_path):
     df = pd.DataFrame(results)
 
     # Features: optical intensity and per-block latency
-    X = df[["optical_signal", "latency"]]
+    X = df[["optical_signal", "latency", "hamming_weight"]]
     y = df["is_malicious"]
 
     # Split: 30% training, 70% testing

@@ -21,24 +21,26 @@ MAX_BLOCKS = 10000
 # process_block()
 # Process a single block, extracting timing and thermal features.
 #
-# @param args - A tuple containing a block, its index, and an anomaly flag.
+# @param args - A tuple containing a block and an anomaly flag.
 # @return A dictionary containing timing, thermal, and label features.
 def process_block(args):
-    block, index, inject_anomaly = args
+    block, _, inject_anomaly = args
 
     start_time = time.perf_counter()
     modified_block = list(block)
 
-    base_temp = 38.0
-    current_temp = base_temp + random.uniform(-0.3, 0.3)
+    # Base sensors (simulated hardware baselines)
+    base_thermal = 35.0  # Celsius
+
+    # Hamming Weight (count of '1' bits in the block)
+    hw = sum(bin(b).count("1") for b in block)
 
     if inject_anomaly:
-        anomaly = random.choice(["timing_delay", "thermal_spike"])
-
-        if anomaly == "timing_delay":
-            time.sleep(random.uniform(0.005, 0.02))
+        anomaly_type = random.choice(["timing_delay", "thermal_spike"])
+        if anomaly_type == "timing_delay":
+            time.sleep(random.uniform(0.005, 0.01))
         else:
-            current_temp += random.uniform(8.0, 15.0)
+            base_thermal += 8.0  # High thermal spike
             modified_block[0] ^= 0xFF
 
     cipher = AES.new(KEY, AES.MODE_ECB)
@@ -46,9 +48,9 @@ def process_block(args):
     end_time = time.perf_counter()
 
     return {
-        "index": index,
-        "time": end_time - start_time,
-        "thermal": current_temp,
+        "timing": end_time - start_time,
+        "thermal": base_thermal + (hw * 0.5) + random.uniform(-0.5, 0.5),
+        "hamming_weight": hw,
         "is_malicious": 1 if inject_anomaly else 0,
     }
 
@@ -60,7 +62,7 @@ def process_block(args):
 # @return A dictionary containing one threshold per feature.
 def calculate_thresholds(results):
     thresholds = {}
-    for sensor in ["time", "thermal"]:
+    for sensor in ["time", "thermal", "hamming_weight"]:
         vals = [r[sensor] for r in results]
         mu = sum(vals) / len(vals)
         sigma = (sum((v - mu) ** 2 for v in vals) / len(vals)) ** 0.5
@@ -105,7 +107,9 @@ def run_on_file(file_path):
     tp, fp, fn, tn = 0, 0, 0, 0
     for r in results[split:]:
         detected = (
-            r["time"] > thresholds["time"] or r["thermal"] > thresholds["thermal"]
+            r["time"] > thresholds["time"]
+            or r["thermal"] > thresholds["thermal"]
+            or r["hamming_weight"] > thresholds["hamming_weight"]
         )
 
         if r["is_malicious"] and detected:
@@ -133,7 +137,9 @@ def run_on_file(file_path):
     predictions = results[split:]
     for row in predictions:
         row["predicted_label"] = int(
-            row["time"] > thresholds["time"] or row["thermal"] > thresholds["thermal"]
+            row["time"] > thresholds["time"]
+            or row["thermal"] > thresholds["thermal"]
+            or row["hamming_weight"] > thresholds["hamming_weight"]
         )
     pd.DataFrame(predictions).to_csv(
         os.path.join(
